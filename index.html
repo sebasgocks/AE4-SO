@@ -1496,6 +1496,18 @@ body.modo-proyector .marco{ font-size:12px; min-height:88px; }
   </div>
 
   <div class="rm-panel">
+    <div class="rm-titulo">Scroll en Proyector</div>
+    <div class="rm-grid-2">
+      <button type="button" class="rm-btn" style="background:#0369a1;" data-rm-cmd="scroll_up">⬆ Subir</button>
+      <button type="button" class="rm-btn" style="background:#0369a1;" data-rm-cmd="scroll_down">⬇ Bajar</button>
+    </div>
+    <div class="rm-grid-2">
+      <button type="button" class="rm-btn" style="background:#334155;font-size:13px;padding:10px;" data-rm-cmd="scroll_top">⏫ Ir Arriba</button>
+      <button type="button" class="rm-btn" style="background:#334155;font-size:13px;padding:10px;" data-rm-cmd="scroll_bottom">⏬ Ir Abajo</button>
+    </div>
+  </div>
+
+  <div class="rm-panel">
     <div class="rm-titulo">Pruebas en Vivo</div>
     <div class="rm-grid-2">
       <button type="button" class="rm-btn" style="background:#b45309;font-size:13px;" data-rm-cmd="forzar_fallo">🧪 Forzar Fallo Pág.</button>
@@ -9168,6 +9180,14 @@ class ControlRemotoManager {
     } else if (msg.cmd === 'tab' && msg.tab) {
       const btnTab = document.querySelector(`.pestana[data-tab="${msg.tab}"]`);
       if (btnTab) btnTab.click();
+    } else if (msg.cmd === 'scroll_up') {
+      window.scrollBy({ top: -320, behavior: 'smooth' });
+    } else if (msg.cmd === 'scroll_down') {
+      window.scrollBy({ top: 320, behavior: 'smooth' });
+    } else if (msg.cmd === 'scroll_top') {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } else if (msg.cmd === 'scroll_bottom') {
+      window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'smooth' });
     }
     this.difundirEstado();
   }
