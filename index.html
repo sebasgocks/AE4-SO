@@ -1322,21 +1322,21 @@ html:fullscreen, body:fullscreen, :fullscreen {
 <div class="modal-fondo" id="modal-dispositivo">
   <div class="modal-caja" style="max-width:680px;">
     <div class="modal-header">
-      <h3>🔌 Conectar Periférico Físico Real (Pendrive USB / Mouse)</h3>
+      <h3>🔌 Conectar Periférico Físico Real (Pendrive USB)</h3>
       <button type="button" class="btn-cerrar-modal" data-cerrar-modal="modal-dispositivo">&times;</button>
     </div>
     <div class="modal-body">
       <div class="hw-radar" id="hw-radar-box">
         <span class="hw-pulso"></span>
         <div>
-          <strong id="hw-radar-titulo">Esperando conexión de periférico físico en puertos USB / HID...</strong>
+          <strong id="hw-radar-titulo">Esperando conexión de Pendrive USB...</strong>
           <div id="hw-radar-sub" style="font-size:11.5px;color:var(--texto-suave);">
-            Insertá tu Pendrive USB o mové/hacé clic con tu Mouse físico para montarlo e integrarlo en vivo al simulador.
+            Insertá tu Pendrive USB y seleccionalo para montarlo e integrarlo en vivo al Sistema de Archivos.
           </div>
         </div>
       </div>
 
-      <div class="hw-grid">
+      <div class="hw-grid" style="grid-template-columns:1fr;">
         <!-- TARJETA 1: PENDRIVE / UNIDAD USB REAL -->
         <div class="hw-card">
           <div class="hw-card-cab">
@@ -1348,33 +1348,13 @@ html:fullscreen, body:fullscreen, :fullscreen {
           </div>
           <p class="hw-desc">
             Al conectar el Pendrive y elegir su unidad, el simulador registra el periférico <strong>Pendrive_USB</strong>
-            (<code>Mutex_Pendrive_USB = 1</code>) y carga todas sus carpetas y archivos reales en el Árbol y en el Mapa de Bloques del Disco.
+            (<code>Mutex_Pendrive_USB = LIBRE</code>) y carga todas sus carpetas y archivos reales en el Árbol y en el Mapa de Bloques del Disco.
           </p>
           <div id="hw-usb-estado" class="hw-estado">⏳ Esperando selección de unidad USB...</div>
           <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:auto;">
             <button type="button" class="btn btn-primario" id="btn-montar-pendrive" style="flex:1 1 auto;">📂 Seleccionar y Montar Pendrive USB</button>
           </div>
           <input type="file" id="input-pendrive-dir" webkitdirectory directory multiple class="oculto" />
-        </div>
-
-        <!-- TARJETA 2: MOUSE / PERIFÉRICO HID REAL -->
-        <div class="hw-card">
-          <div class="hw-card-cab">
-            <span class="hw-ico">🖱️</span>
-            <div>
-              <div class="hw-nom">Mouse Óptico / USB Real</div>
-              <div class="hw-sub">Captura de interrupciones y eventos reales del hardware</div>
-            </div>
-          </div>
-          <p class="hw-desc">
-            Detecta en tiempo real el movimiento, clics y rueda de tu Mouse físico conectado, registra
-            <strong>Mouse_USB</strong> (<code>Mutex_Mouse_USB = 1</code>) en E/S y permite disparar transferencias por interrupción.
-          </p>
-          <div id="hw-mouse-estado" class="hw-estado">⏳ Mové el mouse o hacé clic aquí para detectar el periférico...</div>
-          <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:auto;">
-            <button type="button" class="btn btn-exito" id="btn-conectar-mouse-real" style="flex:1 1 auto;">🖱️ Conectar Mouse y Montar /mouse</button>
-            <button type="button" class="btn btn-info btn-chico" id="btn-vincular-mouse-usb" style="width:100%;" title="Autorizá tu mouse USB en Chrome/Edge para que al enchufarlo o desenchufarlo aparezca y desaparezca /mouse automáticamente">🔗 Vincular USB (Auto enchufe / desenchufe)</button>
-          </div>
         </div>
       </div>
 
@@ -7084,7 +7064,7 @@ class InterfazUI {
     this._enlazarEventos();
     this._poblarSelectorEscenarios();
     this.cargarEscenarioPorId('AE4-01');
-    this._iniciarEscuchaHardwareMouse();
+
   }
 
   // ===================================================================
@@ -9012,38 +8992,102 @@ class InterfazUI {
     this.$('modal-dispositivo')?.classList.add('visible');
   }
 
+  async _leerArchivosDesdeHandle(dirHandle) {
+    const lista = [];
+    const recorrer = async (handle, prefijo = '') => {
+      for await (const [nombre, entry] of handle.entries()) {
+        if (lista.length >= 60) break;
+        const rutaRel = prefijo ? `${prefijo}/${nombre}` : nombre;
+        if (entry.kind === 'file') {
+          const file = await entry.getFile();
+          let vistaPrevia = null;
+          if (file.size > 0 && file.size <= 32768 && /\.(txt|md|csv|json|cfg|log|html|js|py|c|cpp)$/i.test(file.name)) {
+            try {
+              vistaPrevia = (await file.text()).slice(0, 260);
+            } catch (_) {}
+          }
+          lista.push({
+            rutaRelativa: rutaRel,
+            nombre: file.name,
+            tamanoBytes: file.size,
+            tipoMime: file.type,
+            vistaPrevia
+          });
+        } else if (entry.kind === 'directory') {
+          await recorrer(entry, rutaRel);
+        }
+      }
+    };
+    await recorrer(dirHandle, '');
+    return lista;
+  }
+
+  _iniciarMonitorPendrive(dirHandle) {
+    this._pendriveHandle = dirHandle;
+    this._pendriveConectado = true;
+    if (this._pendriveMonitorTimer) {
+      clearInterval(this._pendriveMonitorTimer);
+    }
+    this._pendriveMonitorTimer = setInterval(async () => {
+      if (!this._pendriveHandle) return;
+      try {
+        // Intentar leer el directorio raíz del pendrive físico
+        const iter = this._pendriveHandle.entries();
+        await iter.next();
+        // Si respondió y estaba desmontado, volvió a conectarse físicamente: remontar automáticamente
+        if (!this._pendriveConectado) {
+          this._pendriveConectado = true;
+          const lista = await this._leerArchivosDesdeHandle(this._pendriveHandle);
+          this._finalizarMontajePendrive(this._pendriveHandle.name || 'USB_Drive', lista, true);
+        }
+      } catch (_) {
+        // Si falla la lectura del handle, el pendrive fue desenchufado físicamente de la PC
+        if (this._pendriveConectado) {
+          this._pendriveConectado = false;
+          this._desmontarPendriveAutomatico();
+        }
+      }
+    }, 1500);
+  }
+
+  _desmontarPendriveAutomatico() {
+    const tieneDisp = Boolean(this.kernel.gestorES.obtener('Pendrive_USB'));
+    const tieneFs = Boolean(this.kernel.fs.obtenerPorRuta('/pendrive'));
+    if (!tieneDisp && !tieneFs) return;
+
+    let bloquesLib = 0;
+    if (tieneDisp) {
+      const r = this.kernel.eliminarDispositivo('Pendrive_USB');
+      bloquesLib = r.desmontaje?.bloquesLiberados?.length || 0;
+    } else if (tieneFs) {
+      const r = this.kernel.fs.desmontarPendriveReal();
+      bloquesLib = r.bloquesLiberados?.length || 0;
+    }
+
+    this.ultimoPendriveMontado = null;
+    if (this.rutaSeleccionadaFS.startsWith('/pendrive')) {
+      this.rutaSeleccionadaFS = '/home/alumno/notas.txt';
+    }
+    const usbEst = this.$('hw-usb-estado');
+    if (usbEst) {
+      usbEst.classList.remove('ok');
+      usbEst.textContent = '⏳ Pendrive desconectado. Volvé a enchufarlo para remontarlo automáticamente.';
+    }
+    this.renderizarTodo();
+    this.mostrarToast(
+      `🔌 Pendrive USB retirado físicamente: /pendrive y sus archivos fueron eliminados automáticamente (${bloquesLib} bloques liberados).`,
+      'exito'
+    );
+  }
+
   async _seleccionarYMontarPendriveReal() {
     // Si el navegador soporta File System Access API (Chrome / Edge), permite abrir directamente el Pendrive
     if (typeof window !== 'undefined' && typeof window.showDirectoryPicker === 'function') {
       try {
         const dirHandle = await window.showDirectoryPicker({ mode: 'read' });
-        const lista = [];
-        const recorrer = async (handle, prefijo = '') => {
-          for await (const [nombre, entry] of handle.entries()) {
-            if (lista.length >= 60) break;
-            const rutaRel = prefijo ? `${prefijo}/${nombre}` : nombre;
-            if (entry.kind === 'file') {
-              const file = await entry.getFile();
-              let vistaPrevia = null;
-              if (file.size > 0 && file.size <= 32768 && /\.(txt|md|csv|json|cfg|log|html|js|py|c|cpp)$/i.test(file.name)) {
-                try {
-                  vistaPrevia = (await file.text()).slice(0, 260);
-                } catch (_) {}
-              }
-              lista.push({
-                rutaRelativa: rutaRel,
-                nombre: file.name,
-                tamanoBytes: file.size,
-                tipoMime: file.type,
-                vistaPrevia
-              });
-            } else if (entry.kind === 'directory') {
-              await recorrer(entry, rutaRel);
-            }
-          }
-        };
-        await recorrer(dirHandle, '');
-        this._finalizarMontajePendrive(dirHandle.name || 'USB_Drive', lista);
+        const lista = await this._leerArchivosDesdeHandle(dirHandle);
+        this._finalizarMontajePendrive(dirHandle.name || 'USB_Drive', lista, false);
+        this._iniciarMonitorPendrive(dirHandle);
         return;
       } catch (err) {
         if (err && err.name === 'AbortError') return;
@@ -9053,7 +9097,7 @@ class InterfazUI {
     this.$('input-pendrive-dir')?.click();
   }
 
-  _finalizarMontajePendrive(nombreUnidad, listaArchivos) {
+  _finalizarMontajePendrive(nombreUnidad, listaArchivos, esReconexionAuto = false) {
     // 1. Registrar el periférico Pendrive_USB en GestorES si aún no existe
     let disp = this.kernel.gestorES.obtener('Pendrive_USB');
     if (!disp) {
