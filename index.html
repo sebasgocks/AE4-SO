@@ -910,6 +910,12 @@ body.modo-proyector .marco{ font-size:12px; min-height:88px; }
   display:flex; justify-content:space-between; align-items:center;
 }
 
+  
+html:fullscreen, body:fullscreen, :fullscreen {
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+}
+
   </style>
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
@@ -1485,13 +1491,16 @@ body.modo-proyector .marco{ font-size:12px; min-height:88px; }
 
   <div class="rm-panel">
     <div class="rm-titulo">Cambiar Pestaña en Proyector</div>
+    <div class="rm-grid-2" style="margin-bottom:4px;">
+      <button type="button" class="rm-btn rm-btn-tab" style="background:#0f766e;border-color:#2dd4bf;" data-rm-cmd="principal">🏠 Principal</button>
+      <button type="button" class="rm-btn rm-btn-tab" data-rm-cmd="proyector">⛶ Full</button>
+    </div>
     <div class="rm-grid-3">
       <button type="button" class="rm-btn rm-btn-tab" data-rm-tab="es">⚡ E/S</button>
       <button type="button" class="rm-btn rm-btn-tab" data-rm-tab="fs">📁 Archivos</button>
       <button type="button" class="rm-btn rm-btn-tab" data-rm-tab="mem">🧠 Memoria</button>
       <button type="button" class="rm-btn rm-btn-tab" data-rm-tab="pcb">📋 PCB</button>
       <button type="button" class="rm-btn rm-btn-tab" data-rm-tab="metricas">📊 Métricas</button>
-      <button type="button" class="rm-btn rm-btn-tab" data-rm-cmd="proyector">⛶ Full</button>
     </div>
   </div>
 
@@ -9179,15 +9188,28 @@ class ControlRemotoManager {
       ui.cargarEscenarioPorId(msg.id);
     } else if (msg.cmd === 'tab' && msg.tab) {
       const btnTab = document.querySelector(`.pestana[data-tab="${msg.tab}"]`);
-      if (btnTab) btnTab.click();
-    } else if (msg.cmd === 'scroll_up') {
-      window.scrollBy({ top: -320, behavior: 'smooth' });
-    } else if (msg.cmd === 'scroll_down') {
-      window.scrollBy({ top: 320, behavior: 'smooth' });
-    } else if (msg.cmd === 'scroll_top') {
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    } else if (msg.cmd === 'scroll_bottom') {
-      window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'smooth' });
+      if (btnTab) {
+        btnTab.click();
+        const tarjetaTabs = btnTab.closest('.tarjeta');
+        if (tarjetaTabs) {
+          setTimeout(() => tarjetaTabs.scrollIntoView({ behavior: 'smooth', block: 'start' }), 60);
+        }
+      }
+    } else if (msg.cmd === 'principal' || msg.cmd === 'scroll_up' || msg.cmd === 'scroll_down' || msg.cmd === 'scroll_top' || msg.cmd === 'scroll_bottom') {
+      const scroller = document.fullscreenElement || document.scrollingElement || document.documentElement;
+      const delta = msg.cmd === 'scroll_up' ? -350 : 350;
+      if (msg.cmd === 'principal' || msg.cmd === 'scroll_top') {
+        scroller.scrollTo({ top: 0, behavior: 'smooth' });
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+        document.body.scrollTop = 0;
+      } else if (msg.cmd === 'scroll_bottom') {
+        const maxH = Math.max(scroller.scrollHeight, document.documentElement.scrollHeight, document.body.scrollHeight);
+        scroller.scrollTo({ top: maxH, behavior: 'smooth' });
+        window.scrollTo({ top: maxH, behavior: 'smooth' });
+      } else {
+        scroller.scrollBy({ top: delta, behavior: 'smooth' });
+        window.scrollBy({ top: delta, behavior: 'smooth' });
+      }
     }
     this.difundirEstado();
   }
