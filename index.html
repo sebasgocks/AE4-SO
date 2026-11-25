@@ -1372,7 +1372,8 @@ html:fullscreen, body:fullscreen, :fullscreen {
           </p>
           <div id="hw-mouse-estado" class="hw-estado">⏳ Mové el mouse o hacé clic aquí para detectar el periférico...</div>
           <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:auto;">
-            <button type="button" class="btn btn-exito" id="btn-conectar-mouse-real" style="flex:1 1 auto;">🖱️ Conectar Mouse Físico Detectado</button>
+            <button type="button" class="btn btn-exito" id="btn-conectar-mouse-real" style="flex:1 1 auto;">🖱️ Conectar Mouse y Montar /mouse</button>
+            <button type="button" class="btn btn-info btn-chico" id="btn-vincular-mouse-usb" style="width:100%;" title="Autorizá tu mouse USB en Chrome/Edge para que al enchufarlo o desenchufarlo aparezca y desaparezca /mouse automáticamente">🔗 Vincular USB (Auto enchufe / desenchufe)</button>
           </div>
         </div>
       </div>
@@ -4812,6 +4813,160 @@ class SistemaArchivos {
   }
 
   /**
+   * Monta el periférico físico Mouse_USB creando la carpeta `/mouse` y sus archivos
+   * de controlador/configuración con Asignación Indexada en el mapa de bloques.
+   * @param {string} [nombreHw='Mouse_USB']
+   * @param {number} [tick=0]
+   */
+  montarMouseReal(nombreHw = 'Mouse_USB', tick = 0) {
+    const rutaBase = '/mouse';
+    const existente = this.obtenerPorRuta(rutaBase);
+    if (existente) {
+      return {
+        ok: true,
+        puntoMontaje: rutaBase,
+        archivosMontados: existente.hijos.length,
+        primeraRuta: '/mouse/driver_hid.sys'
+      };
+    }
+
+    const raiz = this.inodos.get(this.raizId);
+    if (!raiz || this.bloquesLibresCount() < 8) {
+      return { ok: false, puntoMontaje: rutaBase, archivosMontados: 0, primeraRuta: '/' };
+    }
+
+    const idDir = this.siguienteInodo++;
+    const blkDir = this._asignarBloqueLibre('dir', idDir, rutaBase);
+    const dirMouse = new Inodo({
+      id: idDir,
+      nombre: 'mouse',
+      ruta: rutaBase,
+      tipo: 'directorio',
+      propietario: 'root',
+      permisos: 'rwxr-x',
+      tamanoKB: this.tamBloqueKB,
+      padreId: this.raizId,
+      bloqueDir: blkDir,
+      creadoTick: tick,
+      modificadoTick: tick,
+      origenFisico: 'Mouse_USB'
+    });
+    this.inodos.set(idDir, dirMouse);
+    this.rutas.set(rutaBase, idDir);
+    raiz.hijos.push(idDir);
+
+    const archivosMouse = [
+      {
+        nombre: 'driver_hid.sys',
+        propietario: 'root',
+        permisos: 'rwxr-x',
+        kb: 8,
+        vistaPrevia: `[HID_DRIVER] Dispositivo: ${nombreHw}\nProtocolo: USB-HID Boot Mouse\nInterrupción: IRQ_Mouse_USB\nEstado: ACTIVO`
+      },
+      {
+        nombre: 'config_dpi.cfg',
+        propietario: 'alumno',
+        permisos: 'rw-r--',
+        kb: 4,
+        vistaPrevia: `device=${nombreHw}\ndpi=1600\npolling_rate_hz=1000\nbuffer_kb=2`
+      },
+      {
+        nombre: 'eventos_hid.log',
+        propietario: 'alumno',
+        permisos: 'rw-r--',
+        kb: 4,
+        vistaPrevia: `[T=${tick}] Mouse USB conectado y montado en /mouse\n[T=${tick}] Canal de interrupciones HID listo.`
+      }
+    ];
+
+    let archivosMontados = 0;
+    let primeraRuta = rutaBase;
+    for (const item of archivosMouse) {
+      const cantDatos = Math.max(1, Math.ceil(item.kb / this.tamBloqueKB));
+      if (this.bloquesLibresCount() < cantDatos + 1) break;
+      const rutaArch = `${rutaBase}/${item.nombre}`;
+      const idArch = this.siguienteInodo++;
+      const blkIdx = this._asignarBloqueLibre('indice', idArch, rutaArch);
+      const blksDatos = [];
+      for (let i = 0; i < cantDatos; i++) {
+        const bd = this._asignarBloqueLibre('datos', idArch, rutaArch);
+        if (bd !== null) blksDatos.push(bd);
+      }
+      const inodoArch = new Inodo({
+        id: idArch,
+        nombre: item.nombre,
+        ruta: rutaArch,
+        tipo: 'archivo',
+        propietario: item.propietario,
+        permisos: item.permisos,
+        tamanoKB: cantDatos * this.tamBloqueKB,
+        padreId: idDir,
+        bloqueIndice: blkIdx,
+        bloquesDatos: blksDatos,
+        creadoTick: tick,
+        modificadoTick: tick,
+        origenFisico: 'Mouse_USB',
+        vistaPrevia: item.vistaPrevia
+      });
+      this.inodos.set(idArch, inodoArch);
+      this.rutas.set(rutaArch, idArch);
+      dirMouse.hijos.push(idArch);
+      if (archivosMontados === 0) primeraRuta = rutaArch;
+      archivosMontados++;
+      this.escriturasKB += inodoArch.tamanoKB;
+      this.operacionesExitosas++;
+    }
+
+    return {
+      ok: true,
+      puntoMontaje: rutaBase,
+      archivosMontados,
+      primeraRuta
+    };
+  }
+
+  /**
+   * Desmonta `/mouse` y libera todos sus bloques en el mapa del disco.
+   * @returns {{ok:boolean, bloquesLiberados:number[], inodosEliminados:number}}
+   */
+  desmontarMouseReal() {
+    const nodoRaizMouse = this.obtenerPorRuta('/mouse');
+    if (!nodoRaizMouse) {
+      return { ok: false, bloquesLiberados: [], inodosEliminados: 0 };
+    }
+
+    const bloquesLiberados = [];
+    let inodosEliminados = 0;
+
+    const eliminarRecursivo = (inodoId) => {
+      const n = this.inodos.get(inodoId);
+      if (!n) return;
+      for (const hid of [...n.hijos]) {
+        eliminarRecursivo(hid);
+      }
+      for (const b of n.bloquesOcupados()) {
+        this._liberarBloque(b);
+        bloquesLiberados.push(b);
+      }
+      this.rutas.delete(n.ruta);
+      this.inodos.delete(n.id);
+      inodosEliminados++;
+    };
+
+    const raiz = this.inodos.get(this.raizId);
+    if (raiz) {
+      raiz.hijos = raiz.hijos.filter((hid) => hid !== nodoRaizMouse.id);
+    }
+    eliminarRecursivo(nodoRaizMouse.id);
+
+    return {
+      ok: true,
+      bloquesLiberados,
+      inodosEliminados
+    };
+  }
+
+  /**
    * Estadísticas de ocupación del disco para métricas y tarjetas.
    */
   estadisticas() {
@@ -5439,13 +5594,18 @@ class SimuladorKernel {
     }
 
     let desmontaje = null;
+    let puntoDesmontado = '';
     if (res.dispositivo && res.dispositivo.nombre === 'Pendrive_USB') {
       desmontaje = this.fs.desmontarPendriveReal();
+      puntoDesmontado = '/pendrive';
+    } else if (res.dispositivo && res.dispositivo.nombre === 'Mouse_USB') {
+      desmontaje = this.fs.desmontarMouseReal();
+      puntoDesmontado = '/mouse';
     }
 
     this.registrarLog(
       'es',
-      `🔌 Periférico ${res.dispositivo.icono} ${res.dispositivo.nombre} desconectado y eliminado.${desmontaje?.ok ? ` Unidad /pendrive desmontada (${desmontaje.bloquesLiberados.length} bloques liberados).` : ''}`,
+      `🔌 Periférico ${res.dispositivo.icono} ${res.dispositivo.nombre} desconectado y eliminado.${desmontaje?.ok ? ` Carpeta ${puntoDesmontado} desmontada (${desmontaje.bloquesLiberados.length} bloques liberados).` : ''}`,
       true
     );
     return { ...res, desmontaje };
@@ -6924,6 +7084,7 @@ class InterfazUI {
     this._enlazarEventos();
     this._poblarSelectorEscenarios();
     this.cargarEscenarioPorId('AE4-01');
+    this._iniciarEscuchaHardwareMouse();
   }
 
   // ===================================================================
@@ -7900,10 +8061,15 @@ class InterfazUI {
             if (this.rutaSeleccionadaFS.startsWith('/pendrive')) {
               this.rutaSeleccionadaFS = '/home/alumno/notas.txt';
             }
+          } else if (nom === 'Mouse_USB') {
+            if (this.rutaSeleccionadaFS.startsWith('/mouse')) {
+              this.rutaSeleccionadaFS = '/home/alumno/notas.txt';
+            }
           }
+          const carpetaTxt = nom === 'Mouse_USB' ? '/mouse' : '/pendrive';
           this.mostrarToast(
             r.desmontaje?.ok
-              ? `🗑️ ${nom} desconectado y unidad /pendrive desmontada (${r.desmontaje.bloquesLiberados.length} bloques liberados).`
+              ? `🗑️ ${nom} desconectado y carpeta ${carpetaTxt} eliminada (${r.desmontaje.bloquesLiberados.length} bloques liberados).`
               : `🗑️ ${r.mensaje}`,
             'exito'
           );
@@ -7986,9 +8152,9 @@ class InterfazUI {
             : '<div class="mensaje-sin-datos">Archivo vacío (0 KB, sin bloque índice asignado).</div>')
         : `<div class="mensaje-sin-datos">Bloque de directorio: <strong>B${seleccionado.bloqueDir}</strong> (${seleccionado.hijos.length} entradas).</div>`;
 
-      const extraPendrive = seleccionado.origenFisico === 'Pendrive_USB'
+      const extraPendrive = (seleccionado.origenFisico === 'Pendrive_USB' || seleccionado.origenFisico === 'Mouse_USB')
         ? `<div style="margin-top:5px;font-size:11px;color:#166534;background:#dcfce7;padding:4px 8px;border-radius:6px;border:1px solid #86efac;">
-             💾 <strong>Origen Físico: Pendrive USB Real</strong>
+             ${seleccionado.origenFisico === 'Mouse_USB' ? '🖱️ <strong>Origen Físico: Mouse USB Real</strong>' : '💾 <strong>Origen Físico: Pendrive USB Real</strong>'}
              ${seleccionado.tamanoBytesReal !== null ? ` · Tamaño físico real: <strong>${seleccionado.tamanoBytesReal.toLocaleString('es-AR')} bytes</strong>` : ''}
              ${seleccionado.vistaPrevia ? `<div class="mono" style="margin-top:4px;padding:4px 6px;background:#fff;border-radius:4px;color:#0f172a;max-height:70px;overflow:auto;white-space:pre-wrap;">${this._esc(seleccionado.vistaPrevia)}</div>` : ''}
            </div>`
@@ -8716,7 +8882,10 @@ class InterfazUI {
     window.addEventListener('wheel', registrarActividadMouse);
 
     this.$('btn-conectar-mouse-real')?.addEventListener('click', () => {
-      this._conectarMouseFisicoReal();
+      this._conectarMouseFisicoReal('Mouse_USB', false);
+    });
+    this.$('btn-vincular-mouse-usb')?.addEventListener('click', () => {
+      this._vincularMouseUSBReal();
     });
 
     // 3. Confirmar otro dispositivo personalizado manual
@@ -8944,7 +9113,7 @@ class InterfazUI {
     );
   }
 
-  _conectarMouseFisicoReal() {
+  _conectarMouseFisicoReal(nombreHw = 'Mouse_USB', desdeAutoUsb = false) {
     let disp = this.kernel.gestorES.obtener('Mouse_USB');
     if (!disp) {
       disp = this.kernel.gestorES.conectarDispositivo({
@@ -8957,21 +9126,116 @@ class InterfazUI {
         esEntrada: true
       });
     }
+    const resFs = this.kernel.fs.montarMouseReal(nombreHw, this.kernel.reloj);
+    if (resFs.ok) {
+      this.rutaSeleccionadaFS = resFs.primeraRuta || '/mouse';
+    }
+
     const radar = this.$('hw-radar-box');
     if (radar) radar.classList.add('conectado');
     const mouseEst = this.$('hw-mouse-estado');
     if (mouseEst) {
       mouseEst.classList.add('ok');
-      mouseEst.textContent = `✔ Mouse_USB conectado (${disp.semaforoNombre} = LIBRE · ${Math.max(1, this.mouseEventosCount)} eventos HID)`;
+      mouseEst.textContent = `✔ ${nombreHw} conectado y montado en /mouse (${resFs.archivosMontados} archivos)`;
     }
     this.kernel.registrarLog(
       'es',
-      `🖱️ Periférico físico Mouse_USB conectado (${disp.semaforoNombre} = LIBRE, Buffer 2 KB, 2 KB/tick).`,
+      `🖱️ Periférico físico ${nombreHw} conectado (${disp.semaforoNombre} = LIBRE) y montado en /mouse (${resFs.archivosMontados} archivos).`,
       true
     );
-    this.$('modal-dispositivo')?.classList.remove('visible');
+    if (!desdeAutoUsb) {
+      this.$('modal-dispositivo')?.classList.remove('visible');
+    }
     this.renderizarTodo();
-    this.mostrarToast('🖱️ Mouse físico conectado como Mouse_USB en el Gestor de E/S.', 'exito');
+    this.mostrarToast(`🖱️ ${nombreHw} conectado: carpeta /mouse y ${resFs.archivosMontados} archivos creados automáticamente.`, 'exito');
+  }
+
+  _desconectarMouseFisicoAutomatico() {
+    if (!this.kernel.gestorES.obtener('Mouse_USB') && !this.kernel.fs.obtenerPorRuta('/mouse')) return;
+    const r = this.kernel.eliminarDispositivo('Mouse_USB');
+    if (this.rutaSeleccionadaFS.startsWith('/mouse')) {
+      this.rutaSeleccionadaFS = '/home/alumno/notas.txt';
+    }
+    const mouseEst = this.$('hw-mouse-estado');
+    if (mouseEst) {
+      mouseEst.classList.remove('ok');
+      mouseEst.textContent = '⏳ Mouse físico desconectado. Volvé a enchufarlo para montarlo.';
+    }
+    this.renderizarTodo();
+    this.mostrarToast(
+      `🔌 Mouse físico desconectado: carpeta /mouse y sus archivos fueron eliminados automáticamente (${r.desmontaje?.bloquesLiberados?.length || 0} bloques liberados).`,
+      'exito'
+    );
+  }
+
+  async _vincularMouseUSBReal() {
+    let vinculado = false;
+    if (navigator.hid && typeof navigator.hid.requestDevice === 'function') {
+      try {
+        const devs = await navigator.hid.requestDevice({
+          filters: [{ usagePage: 1, usage: 2 }] // Generic Desktop Mouse
+        });
+        if (devs && devs.length > 0) {
+          vinculado = true;
+          const nom = devs[0].productName || 'Mouse_USB';
+          this._conectarMouseFisicoReal(nom, false);
+          return;
+        }
+      } catch (err) {
+        if (err && err.name === 'AbortError') return;
+      }
+    }
+    if (!vinculado && navigator.usb && typeof navigator.usb.requestDevice === 'function') {
+      try {
+        const dev = await navigator.usb.requestDevice({ filters: [] });
+        if (dev) {
+          const nom = dev.productName || 'Mouse_USB';
+          this._conectarMouseFisicoReal(nom, false);
+          return;
+        }
+      } catch (err) {
+        if (err && err.name === 'AbortError') return;
+      }
+    }
+    if (!vinculado) {
+      this.mostrarToast('Tu navegador no permitió vincular USB/HID directo; usando conexión manual de Mouse_USB.', 'error');
+      this._conectarMouseFisicoReal('Mouse_USB', false);
+    }
+  }
+
+  _iniciarEscuchaHardwareMouse() {
+    // 1. WebHID: detecta automáticamente enchufe y desenchufe del mouse físico vinculado
+    if (navigator.hid) {
+      navigator.hid.addEventListener('connect', (ev) => {
+        const nom = ev.device?.productName || 'Mouse_USB';
+        this._conectarMouseFisicoReal(nom, true);
+      });
+      navigator.hid.addEventListener('disconnect', () => {
+        this._desconectarMouseFisicoAutomatico();
+      });
+      // Si ya había un mouse HID autorizado previamente y está enchufado al abrir la página, montarlo automáticamente
+      if (typeof navigator.hid.getDevices === 'function') {
+        navigator.hid.getDevices().then((devs) => {
+          const mouseDev = devs.find((d) =>
+            d.collections?.some((c) => c.usagePage === 1 && c.usage === 2)
+          ) || devs[0];
+          if (mouseDev) {
+            this._conectarMouseFisicoReal(mouseDev.productName || 'Mouse_USB', true);
+          }
+        }).catch(() => {});
+      }
+    }
+
+    // 2. WebUSB: respaldo automático de enchufe y desenchufe USB
+    if (navigator.usb) {
+      navigator.usb.addEventListener('connect', (ev) => {
+        const nom = ev.device?.productName || 'Mouse_USB';
+        this._conectarMouseFisicoReal(nom, true);
+      });
+      navigator.usb.addEventListener('disconnect', () => {
+        this._desconectarMouseFisicoAutomatico();
+      });
+    }
   }
 
   mostrarToast(msg, tipo = 'exito') {
