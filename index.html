@@ -1348,7 +1348,7 @@ html:fullscreen, body:fullscreen, :fullscreen {
           </div>
           <p class="hw-desc">
             Al conectar el Pendrive y elegir su unidad, el simulador registra el periférico <strong>Pendrive_USB</strong>
-            (<code>S_Pendrive_USB = 1</code>) y carga todas sus carpetas y archivos reales en el Árbol y en el Mapa de Bloques del Disco.
+            (<code>Mutex_Pendrive_USB = 1</code>) y carga todas sus carpetas y archivos reales en el Árbol y en el Mapa de Bloques del Disco.
           </p>
           <div id="hw-usb-estado" class="hw-estado">⏳ Esperando selección de unidad USB...</div>
           <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:auto;">
@@ -1368,7 +1368,7 @@ html:fullscreen, body:fullscreen, :fullscreen {
           </div>
           <p class="hw-desc">
             Detecta en tiempo real el movimiento, clics y rueda de tu Mouse físico conectado, registra
-            <strong>Mouse_USB</strong> (<code>S_Mouse_USB = 1</code>) en E/S y permite disparar transferencias por interrupción.
+            <strong>Mouse_USB</strong> (<code>Mutex_Mouse_USB = 1</code>) en E/S y permite disparar transferencias por interrupción.
           </p>
           <div id="hw-mouse-estado" class="hw-estado">⏳ Mové el mouse o hacé clic aquí para detectar el periférico...</div>
           <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:auto;">
@@ -3207,7 +3207,7 @@ if (typeof module !== 'undefined' && module.exports) {
  * Implementa:
  *  - Dispositivos periféricos configurables en caliente (Disco, Impresora, Teclado, etc.)
  *  - Colas independientes por dispositivo con política FIFO o Prioridad
- *  - Semáforo binario explícito por dispositivo (S_Disco, S_Impresora, S_Teclado: 1=Libre / 0=Ocupado)
+ *  - Semáforo binario explícito por dispositivo (Mutex_Disco, Mutex_Impresora, Mutex_Teclado: 1=Libre / 0=Ocupado)
  *  - Transferencia por bloques mediante buffer intermedio con recargas/vaciados visibles
  *  - Interrupciones asíncronas (IRQ) al completar cada solicitud
  */
@@ -3234,7 +3234,7 @@ class Dispositivo {
     this.esEntrada = Boolean(cfg.esEntrada);
 
     // Semáforo binario de exclusión mutua: 1 = Libre, 0 = Ocupado
-    this.semaforoNombre = `S_${this.nombre.replace(/\s+/g, '_')}`;
+    this.semaforoNombre = `Mutex_${this.nombre.replace(/\s+/g, '_')}`;
     this.semaforo = 1;
 
     // Estado de ejecución actual y cola de espera
@@ -3350,7 +3350,7 @@ class Dispositivo {
       eventos.push({
         categoria: 'sem',
         clave: true,
-        texto: `🔒 wait(${this.semaforoNombre}): 1 → 0 · ${sol.pid} toma ${this.nombre} (${sol.totalKB} KB, buffer ${this.tamBufferKB} KB).`
+        texto: `🔒 lock(${this.semaforoNombre}): LIBRE → OCUPADO · ${sol.pid} toma ${this.nombre} (${sol.totalKB} KB, buffer ${this.tamBufferKB} KB).`
       });
       return { tomoDispositivo: true, posicionCola: 0, solicitud: sol, eventos };
     }
@@ -3365,7 +3365,7 @@ class Dispositivo {
     eventos.push({
       categoria: 'sem',
       clave: true,
-      texto: `⏳ wait(${this.semaforoNombre}): S=0 (OCUPADO por ${this.actual ? this.actual.pid : '?'}) · ${sol.pid} espera en cola (#${pos}, ${this.politica}).`
+      texto: `⏳ lock(${this.semaforoNombre}): OCUPADO (por ${this.actual ? this.actual.pid : '?'}) · ${sol.pid} espera en cola (#${pos}, ${this.politica}).`
     });
     return { tomoDispositivo: false, posicionCola: pos, solicitud: sol, eventos };
   }
@@ -3510,7 +3510,7 @@ class Dispositivo {
       {
         categoria: 'sem',
         clave: true,
-        texto: `🔓 signal(${this.semaforoNombre}): 0 → 1 (dispositivo liberado).`
+        texto: `🔓 unlock(${this.semaforoNombre}): OCUPADO → LIBRE (dispositivo liberado).`
       }
     ];
 
@@ -3522,7 +3522,7 @@ class Dispositivo {
       eventos.push({
         categoria: 'sem',
         clave: false,
-        texto: `🔒 wait(${this.semaforoNombre}): 1 → 0 · ${siguiente.pid} sale de la cola y toma ${this.nombre}.`
+        texto: `🔒 lock(${this.semaforoNombre}): LIBRE → OCUPADO · ${siguiente.pid} sale de la cola y toma ${this.nombre}.`
       });
     }
 
@@ -6322,9 +6322,9 @@ const CATALOGO_ESCENARIOS = [
     titulo: '2. Escenario 1: Competencia por CPU y el mismo Disco',
     descripcion:
       'Word (abre notas.txt y guarda respaldo.doc), Excel (exporta reporte.csv y lee datos.csv) y Defender (escanea /tmp y /bin/calc) ' +
-      'compiten por la cola única del Disco y su semáforo S_Disco. Mientras tanto, Spotify (solo audio en CPU) ejecuta sin esperas.',
+      'compiten por la cola única del Disco y su mutex Mutex_Disco. Mientras tanto, Spotify (solo audio en CPU) ejecuta sin esperas.',
     observar:
-      'Cola del Disco en E/S, semáforo S_Disco = 0, esperas por exclusión mutua y uso simultáneo de CPU + Disco en el Gantt.',
+      'Cola del Disco en E/S, mutex Mutex_Disco = 0, esperas por exclusión mutua y uso simultáneo de CPU + Disco en el Gantt.',
     config: {
       ramKB: 1024,
       modoMemoria: 'Contigua',
@@ -6378,8 +6378,8 @@ const CATALOGO_ESCENARIOS = [
     hitos: [
       {
         id: 'ae402-h1',
-        titulo: 'Word toma el Disco (S_Disco: 1 → 0)',
-        explicacion: 'wait(S_Disco) marca el Disco como ocupado mientras lee /home/alumno/notas.txt.',
+        titulo: 'Word toma el Disco (Mutex_Disco: 1 → 0)',
+        explicacion: 'lock(Mutex_Disco) marca el Disco como ocupado mientras lee /home/alumno/notas.txt.',
         evaluar: (k) => (k.gestorES.obtener('Disco')?.ticksOcupado || 0) >= 1
       },
       {
@@ -6397,7 +6397,7 @@ const CATALOGO_ESCENARIOS = [
       {
         id: 'ae402-h4',
         titulo: 'Todas las IRQs completadas y todos los procesos finalizan',
-        explicacion: 'Los 4 procesos terminan correctamente y S_Disco vuelve a 1 (LIBRE).',
+        explicacion: 'Los 4 procesos terminan correctamente y Mutex_Disco vuelve a 1 (LIBRE).',
         evaluar: (k) => k.terminado && k.colaTerminados.length === 4
       }
     ]
@@ -6489,10 +6489,10 @@ const CATALOGO_ESCENARIOS = [
     titulo: '4. Escenario 3: Saturación de Impresora vs Cola independiente de Disco',
     descripcion:
       'Cinco programas documentales y gráficos (Word, Excel, Adobe_PDF, Chrome y Photoshop) envían trabajos a la Impresora ' +
-      '(2 ticks acceso + 1 KB/tick): su cola se satura y S_Impresora=0 ordena de a uno. Notepad llega después y abre notas.txt: ' +
+      '(2 ticks acceso + 1 KB/tick): su cola se satura y Mutex_Impresora=0 ordena de a uno. Notepad llega después y abre notas.txt: ' +
       'al usar la cola independiente del Disco, termina mucho antes.',
     observar:
-      'Cola de la Impresora (4 esperando en cola), semáforo S_Impresora = 0 y Notepad finalizando primero.',
+      'Cola de la Impresora (4 esperando en cola), mutex Mutex_Impresora = 0 y Notepad finalizando primero.',
     config: {
       ramKB: 1024,
       modoMemoria: 'Contigua',
@@ -6511,7 +6511,7 @@ const CATALOGO_ESCENARIOS = [
     hitos: [
       {
         id: 'ae404-h1',
-        titulo: 'Cola de Impresora saturada (≥ 3 procesos en espera, S_Impresora=0)',
+        titulo: 'Cola de Impresora saturada (≥ 3 procesos en espera, Mutex_Impresora=0)',
         explicacion: 'La exclusión mutua evita impresiones mezcladas manteniendo los trabajos en cola FIFO.',
         evaluar: (k) => k.metricas.maxColaImpresora >= 3
       },
@@ -6589,7 +6589,7 @@ const CATALOGO_ESCENARIOS = [
       {
         id: 'ae405-h1',
         titulo: 'Excel y VSCode generan tráfico de archivos en el Disco',
-        explicacion: 'El Disco queda ocupado y VSCode entra en la cola esperando S_Disco.',
+        explicacion: 'El Disco queda ocupado y VSCode entra en la cola esperando Mutex_Disco.',
         evaluar: (k) => k.metricas.maxColaDisco >= 1 && (k.gestorES.obtener('Disco')?.ticksOcupado || 0) >= 1
       },
       {
@@ -6681,11 +6681,11 @@ const CATALOGO_ESCENARIOS = [
   {
     id: 'AE4-07',
     grupo: 'E/S, Archivos e Integración Completa',
-    titulo: '7. Exclusión mutua con semáforo e historial de recargas de Buffer (4 KB)',
+    titulo: '7. Exclusión mutua con Mutex e historial de recargas de Buffer (4 KB)',
     descripcion:
-      'Adobe_PDF imprime un documento de 10 KB y Word imprime 6 KB casi simultáneamente. S_Impresora pasa a 0 para Adobe_PDF y Word espera en cola. ' +
+      'Adobe_PDF imprime un documento de 10 KB y Word imprime 6 KB casi simultáneamente. Mutex_Impresora pasa a 0 para Adobe_PDF y Word espera en cola. ' +
       'Como el buffer de la Impresora es de 4 KB, los 10 KB de Adobe_PDF requieren 3 cargas (4 + 4 + 2 KB). Mientras tanto, ' +
-      'Notepad lee entrada del Teclado en paralelo usando S_Teclado.',
+      'Notepad lee entrada del Teclado en paralelo usando Mutex_Teclado.',
     observar:
       'Tarjetas de Impresora y Teclado en la pestaña E/S: semáforos, flujo animado RAM → Buffer → Dispositivo y contador de recargas.',
     config: {
@@ -6702,8 +6702,8 @@ const CATALOGO_ESCENARIOS = [
     hitos: [
       {
         id: 'ae407-h1',
-        titulo: 'Exclusión mutua: S_Impresora=0 para Adobe_PDF y Word espera en cola',
-        explicacion: 'Word incrementa esperasMutex al encontrar el semáforo binario en 0.',
+        titulo: 'Exclusión mutua: Mutex_Impresora=0 para Adobe_PDF y Word espera en cola',
+        explicacion: 'Word incrementa esperasMutex al encontrar el mutex ocupado (locked).',
         evaluar: (k) => (k.gestorES.obtener('Impresora')?.esperasMutex || 0) >= 1
       },
       {
@@ -6714,13 +6714,13 @@ const CATALOGO_ESCENARIOS = [
       },
       {
         id: 'ae407-h3',
-        titulo: 'Notepad usa Teclado (S_Teclado) en paralelo a la Impresora',
-        explicacion: 'Cada periférico tiene su semáforo independiente, logrando paralelismo real de E/S.',
+        titulo: 'Notepad usa Teclado (Mutex_Teclado) en paralelo a la Impresora',
+        explicacion: 'Cada periférico tiene su mutex independiente, logrando paralelismo real de E/S.',
         evaluar: (k) => (k.gestorES.obtener('Teclado')?.ticksOcupado || 0) >= 1
       },
       {
         id: 'ae407-h4',
-        titulo: 'signal(S_Impresora) entrega el recurso a Word y todos terminan',
+        titulo: 'unlock(Mutex_Impresora) entrega el recurso a Word y todos terminan',
         explicacion: 'Al lanzar IRQ_Impresora para Adobe_PDF, Word toma el dispositivo sin intervención manual.',
         evaluar: (k) => k.terminado && k.colaTerminados.length === 3
       }
@@ -7746,7 +7746,7 @@ class InterfazUI {
       <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:8px;">
         <div class="mem-resumen" style="margin:0;">
           <span>IRQs emitidas: <strong>${esStats.irqsTotales}</strong></span>
-          <span>Esperas por Mutex (S=0): <strong>${esStats.esperasMutexTotales}</strong></span>
+          <span>Esperas por Mutex: <strong>${esStats.esperasMutexTotales}</strong></span>
           <span>Datos transferidos: <strong>${esStats.kbTransferidos ?? esStats.kbTotales} KB</strong></span>
           <span>Recargas/vaciados de buffer: <strong>${esStats.recargasTotales}</strong></span>
         </div>
@@ -7835,9 +7835,9 @@ class InterfazUI {
               <div class="sub">Acceso ${d.latenciaAcceso}t · ${d.velocidadKB} KB/t · Buffer ${d.tamBufferKB} KB</div>
             </div>
             <div style="margin-left:auto;display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end;">
-              <div class="semaforo ${libre ? 'libre' : 'ocupado'}" style="margin-left:0;" data-tip="Semáforo binario de exclusión mutua: 1 = Libre, 0 = Ocupado por un proceso">
+              <div class="semaforo ${libre ? 'libre' : 'ocupado'}" style="margin-left:0;" data-tip="Mutex de exclusión mutua: LIBRE (unlocked) o OCUPADO (locked por un proceso)">
                 <span class="luz"></span>
-                <span>${this._esc(d.semaforoNombre)} = ${d.semaforo} (${libre ? 'LIBRE' : 'OCUP.'})</span>
+                <span>${this._esc(d.semaforoNombre)}: ${libre ? 'LIBRE' : 'OCUPADO'}</span>
               </div>
               ${btnEliminarHtml}
             </div>
@@ -7867,7 +7867,7 @@ class InterfazUI {
           <div class="disp-stats">
             <span data-tip="Porcentaje de ticks ocupado">Uso: ${uso}%</span>
             <span data-tip="Interrupciones disparadas al completar E/S">IRQs: ${d.irqsEmitidas}</span>
-            <span data-tip="Veces que wait(S) encontró S=0 y encoló al proceso">Mutex waits: ${d.esperasMutex}</span>
+            <span data-tip="Veces que lock(Mutex) encontró el recurso ocupado y encoló al proceso">Mutex waits: ${d.esperasMutex}</span>
             <span data-tip="Total de KB transferidos">Transf.: ${d.kbTransferidos} KB</span>
           </div>
         </div>
@@ -8493,7 +8493,7 @@ class InterfazUI {
       { e: 'Acceso Medio Mem.', v: `${m.accesoMedio} t`, tip: 'Costo medio efectivo por acceso considerando penalización de fallos.' },
       { e: 'TLB Hit Rate', v: m.tlbTasaPct !== null ? `${m.tlbTasaPct}%` : 'N/A', cls: 'exito', tip: m.tlbTasaPct !== null ? `${m.tlbAciertos} aciertos / ${m.tlbFallos} fallos` : 'Solo aplica a modos con paginación' },
       { e: 'IRQs E/S Atendidas', v: m.esStats.irqsTotales, cls: 'destacada', tip: 'Interrupciones totales lanzadas por los dispositivos al completar transferencias.' },
-      { e: 'Esperas Mutex (S=0)', v: m.esStats.esperasMutexTotales, tip: 'Veces que wait(S_Dispositivo) encontró el recurso ocupado y encoló al proceso.' },
+      { e: 'Esperas Mutex', v: m.esStats.esperasMutexTotales, tip: 'Veces que lock(Mutex) encontró el recurso ocupado y encoló al proceso.' },
       { e: 'Datos E/S Transf.', v: `${m.esStats.kbTotales} KB`, tip: `Con ${m.esStats.recargasTotales} ciclos/recargas de buffer.` },
       { e: 'Uso Disco FS', v: `${m.fsStats.usoPct}%`, tip: `${m.fsStats.ocupados} / ${m.fsStats.totalBloques} bloques ocupados (${m.fsStats.libres} libres).` },
       { e: 'Lecturas / Escrituras FS', v: `${m.fsStats.lecturasKB} / ${m.fsStats.escriturasKB} KB`, tip: 'Volumen total de lectura y escritura validada sobre archivos.' },
@@ -8732,7 +8732,7 @@ class InterfazUI {
           esEntrada: this.$('nd-dir').value === 'entrada'
         });
         this.$('modal-dispositivo').classList.remove('visible');
-        this.kernel.registrarLog('es', `🔌 Nuevo periférico conectado: ${d.icono} ${d.nombre} (Semáforo ${d.semaforoNombre}=1).`, true);
+        this.kernel.registrarLog('es', `🔌 Nuevo periférico conectado: ${d.icono} ${d.nombre} (Mutex ${d.semaforoNombre} = LIBRE).`, true);
         this.renderizarTodo();
         this.mostrarToast(`Dispositivo ${d.nombre} conectado.`, 'exito');
       } catch (err) {
@@ -8922,7 +8922,7 @@ class InterfazUI {
 
     this.kernel.registrarLog(
       'fs',
-      `💾 Pendrive físico "${nombreUnidad}" conectado (${disp.semaforoNombre}=1) y montado en ${res.puntoMontaje}: ${res.archivosMontados} archivos reales cargados con Asignación Indexada.`,
+      `💾 Pendrive físico "${nombreUnidad}" conectado (${disp.semaforoNombre} = LIBRE) y montado en ${res.puntoMontaje}: ${res.archivosMontados} archivos reales cargados con Asignación Indexada.`,
       true
     );
 
@@ -8962,11 +8962,11 @@ class InterfazUI {
     const mouseEst = this.$('hw-mouse-estado');
     if (mouseEst) {
       mouseEst.classList.add('ok');
-      mouseEst.textContent = `✔ Mouse_USB conectado (${disp.semaforoNombre} = 1 · ${Math.max(1, this.mouseEventosCount)} eventos HID)`;
+      mouseEst.textContent = `✔ Mouse_USB conectado (${disp.semaforoNombre} = LIBRE · ${Math.max(1, this.mouseEventosCount)} eventos HID)`;
     }
     this.kernel.registrarLog(
       'es',
-      `🖱️ Periférico físico Mouse_USB conectado (${disp.semaforoNombre}=1, Buffer 2 KB, 2 KB/tick).`,
+      `🖱️ Periférico físico Mouse_USB conectado (${disp.semaforoNombre} = LIBRE, Buffer 2 KB, 2 KB/tick).`,
       true
     );
     this.$('modal-dispositivo')?.classList.remove('visible');
